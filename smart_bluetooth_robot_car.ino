@@ -1,1 +1,233 @@
-#include <SoftwareSerial.h> SoftwareSerial BT(2, 3); // RX, TX for HC-05 // L298N motor driver pins const int ENA = 5; const int IN1 = 7; const int IN2 = 8; const int ENB = 6; const int IN3 = 9; const int IN4 = 10; // Ultrasonic sensor const int trigPin = 12; const int echoPin = 11; // IR sensor const int irPin = A0; // LOW = object detected at back // Outputs const int buzzerPin = 4; const int headLightPin = 13; const int backLightPin = A1; // separate pin for backlights // Parameters const int OBSTACLE_DIST_CM = 20; int driveSpeed = 200; bool obstacleClose = false; bool reversing = false; // Horn state machine bool hornActive = false; unsigned long hornStart = 0; int hornStep = 0; // Backlight blink state unsigned long blinkTimer = 0; bool backLightState = false; void setup() { Serial.begin(9600); BT.begin(9600); pinMode(ENA, OUTPUT); pinMode(ENB, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(trigPin, OUTPUT); pinMode(echoPin, INPUT); pinMode(irPin, INPUT); pinMode(buzzerPin, OUTPUT); pinMode(headLightPin, OUTPUT); pinMode(backLightPin, OUTPUT); stopMotors(); Serial.println("Car ready. Commands: F,B,L,R,S,Y,X,x"); } void loop() { // Read Bluetooth if (BT.available()) { char c = BT.read(); handleCommand(c); } // Ultrasonic safety int dist = readUltrasonic(); obstacleClose = (dist > 0 && dist <= OBSTACLE_DIST_CM); // Handle horn pattern updateHorn(); // Handle backlights + IR/obstacle alerts updateBackLights(); delay(20); } //// ----------------- Motor functions ----------------- void stopMotors() { analogWrite(ENA, 0); analogWrite(ENB, 0); digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); reversing = false; digitalWrite(backLightPin, LOW); } void forwardDrive(int sp) { if (obstacleClose) { stopMotors(); return; } digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENA, sp); analogWrite(ENB, sp); reversing = false; } void reverseDrive(int sp) { digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENA, sp); analogWrite(ENB, sp); reversing = true; // reverse mode } void turnLeft(int sp) { // Left button → car turns left digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENA, sp); analogWrite(ENB, sp); reversing = false; } void turnRight(int sp) { // Right button → car turns right digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENA, sp); analogWrite(ENB, sp); reversing = false; } //// ----------------- Sensors ----------------- int readUltrasonic() { digitalWrite(trigPin, LOW); delayMicroseconds(2); digitalWrite(trigPin, HIGH); delayMicroseconds(10); digitalWrite(trigPin, LOW); unsigned long duration = pulseIn(echoPin, HIGH, 30000UL); if (duration == 0) return -1; return duration / 58; } //// ----------------- Bluetooth commands ----------------- void handleCommand(char c) { switch (c) { case 'F': forwardDrive(driveSpeed); break; case 'B': reverseDrive(driveSpeed); break; case 'L': turnLeft(driveSpeed); break; case 'R': turnRight(driveSpeed); break; case 'S': stopMotors(); break; case 'Y': // Start horn pattern hornActive = true; hornStep = 0; hornStart = millis(); break; case 'X': digitalWrite(headLightPin, HIGH); break; // headlights ON case 'x': digitalWrite(headLightPin, LOW); break; // headlights OFF case '+': driveSpeed = min(255, driveSpeed + 20); break; case '-': driveSpeed = max(80, driveSpeed - 20); break; } } //// ----------------- Horn handler (app-style) ----------------- void updateHorn() { if (!hornActive) return; unsigned long now = millis(); switch (hornStep) { case 0: digitalWrite(buzzerPin, HIGH); // first beep ON hornStep = 1; hornStart = now; break; case 1: if (now - hornStart >= 200) { digitalWrite(buzzerPin, LOW); // OFF hornStep = 2; hornStart = now; } break; case 2: if (now - hornStart >= 80) { digitalWrite(buzzerPin, HIGH); // second beep ON hornStep = 3; hornStart = now; } break; case 3: if (now - hornStart >= 300) { digitalWrite(buzzerPin, LOW); // OFF → horn finished hornActive = false; } break; } } //// ----------------- Backlight handler (with backside IR blink) ----------------- void updateBackLights() { unsigned long now = millis(); // Reverse → solid ON if (reversing) { digitalWrite(backLightPin, HIGH); } // IR sensor detects object at back → fast blink else if (digitalRead(irPin) == LOW) { if (now - blinkTimer >= 200) { // fast blink blinkTimer = now; backLightState = !backLightState; digitalWrite(backLightPin, backLightState); if (!hornActive) digitalWrite(buzzerPin, HIGH); // fast IR beep } else if (!hornActive) { digitalWrite(buzzerPin, LOW); } } // Ultrasonic obstacle → normal blink else if (obstacleClose) { if (now - blinkTimer >= 300) { blinkTimer = now; backLightState = !backLightState; digitalWrite(backLightPin, backLightState); } } else { digitalWrite(backLightPin, LOW); if (!hornActive) digitalWrite(buzzerPin, LOW); } }
+```cpp
+#include <SoftwareSerial.h>
+SoftwareSerial BT(2, 3); // RX, TX for HC-05
+
+// L298N motor driver pins
+const int ENA = 5;
+const int IN1 = 7;
+const int IN2 = 8;
+const int ENB = 6;
+const int IN3 = 9;
+const int IN4 = 10;
+
+// Ultrasonic sensor
+const int trigPin = 12;
+const int echoPin = 11;
+
+// IR sensor
+const int irPin = A0; // LOW = object detected at back
+
+// Outputs
+const int buzzerPin = 4;
+const int headLightPin = 13;
+const int backLightPin = A1; // separate pin for backlights
+
+// Parameters
+const int OBSTACLE_DIST_CM = 20;
+int driveSpeed = 200;
+bool obstacleClose = false;
+bool reversing = false;
+
+// Horn state machine
+bool hornActive = false;
+unsigned long hornStart = 0;
+int hornStep = 0;
+
+// Backlight blink state
+unsigned long blinkTimer = 0;
+bool backLightState = false;
+
+void setup() {
+  Serial.begin(9600);
+  BT.begin(9600);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(irPin, INPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(headLightPin, OUTPUT);
+  pinMode(backLightPin, OUTPUT);
+
+  stopMotors();
+  Serial.println("Car ready. Commands: F,B,L,R,S,Y,X,x");
+}
+
+void loop() {
+  // Read Bluetooth
+  if (BT.available()) {
+    char c = BT.read();
+    handleCommand(c);
+  }
+
+  // Ultrasonic safety
+  int dist = readUltrasonic();
+  obstacleClose = (dist > 0 && dist <= OBSTACLE_DIST_CM);
+
+  // Handle horn pattern
+  updateHorn();
+
+  // Handle backlights + IR/obstacle alerts
+  updateBackLights();
+
+  delay(20);
+}
+
+// ----------------- Motor functions -----------------
+void stopMotors() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  reversing = false;
+  digitalWrite(backLightPin, LOW);
+}
+
+void forwardDrive(int sp) {
+  if (obstacleClose) {
+    stopMotors();
+    return;
+  }
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENA, sp);
+  analogWrite(ENB, sp);
+  reversing = false;
+}
+
+void reverseDrive(int sp) {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  analogWrite(ENA, sp);
+  analogWrite(ENB, sp);
+  reversing = true; // reverse mode
+}
+
+void turnLeft(int sp) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  analogWrite(ENA, sp);
+  analogWrite(ENB, sp);
+  reversing = false;
+}
+
+void turnRight(int sp) {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENA, sp);
+  analogWrite(ENB, sp);
+  reversing = false;
+}
+
+// ----------------- Sensors -----------------
+int readUltrasonic() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  unsigned long duration = pulseIn(echoPin, HIGH, 30000UL);
+  if (duration == 0) return -1;
+  return duration / 58;
+}
+
+// ----------------- Bluetooth commands -----------------
+void handleCommand(char c) {
+  switch (c) {
+    case 'F': forwardDrive(driveSpeed); break;
+    case 'B': reverseDrive(driveSpeed); break;
+    case 'L': turnLeft(driveSpeed); break;
+    case 'R': turnRight(driveSpeed); break;
+    case 'S': stopMotors(); break;
+    case 'Y': // Start horn pattern
+      hornActive = true;
+      hornStep = 0;
+      hornStart = millis();
+      break;
+    case 'X': digitalWrite(headLightPin, HIGH); break; // headlights ON
+    case 'x': digitalWrite(headLightPin, LOW); break;  // headlights OFF
+    case '+': driveSpeed = min(255, driveSpeed + 20); break;
+    case '-': driveSpeed = max(80, driveSpeed - 20); break;
+  }
+}
+
+// ----------------- Horn handler -----------------
+void updateHorn() {
+  if (!hornActive) return;
+  unsigned long now = millis();
+
+  switch (hornStep) {
+    case 0:
+      digitalWrite(buzzerPin, HIGH);
+      hornStep = 1;
+      hornStart = now;
+      break;
+    case 1:
+      if (now - hornStart >= 200) {
+        digitalWrite(buzzerPin, LOW);
+        hornStep = 2;
+        hornStart = now;
+      }
+      break;
+    case 2:
+      if (now - hornStart >= 80) {
+        digitalWrite(buzzerPin, HIGH);
+        hornStep = 3;
+        hornStart = now;
+      }
+      break;
+    case 3:
+      if (now - hornStart >= 300) {
+        digitalWrite(buzzerPin, LOW);
+        hornActive = false;
+      }
+      break;
+  }
+}
+
+// ----------------- Backlight handler -----------------
+void updateBackLights() {
+  unsigned long now = millis();
+
+  if (reversing) {
+    digitalWrite(backLightPin, HIGH);
+  }
+  else if (digitalRead(irPin) == LOW) {
+    if (now - blinkTimer >= 200) {
+      blinkTimer = now;
+      backLightState = !backLightState;
+      digitalWrite(backLightPin, backLightState);
+      if (!hornActive) digitalWrite(buzzerPin, HIGH);
+    } else if (!hornActive) {
+      digitalWrite(buzzerPin, LOW);
+    }
+  }
+  else if (obstacleClose) {
+    if (now - blinkTimer >= 300) {
+      blinkTimer = now;
+      backLightState = !backLightState;
+      digitalWrite(backLightPin, backLightState);
+    }
+  }
+  else {
+    digitalWrite(backLightPin, LOW);
+    if (!hornActive) digitalWrite(buzzerPin, LOW);
+  }
+}
